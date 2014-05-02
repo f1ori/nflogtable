@@ -38,7 +38,8 @@ const char *version_text = "nflogtable Version 0.1\n";
 const char *help_text =
     "Usage: nflogtable [OPTION]\n"
     "Traffic counter for a ipv4 or ipv6 subnet.\n"
-    "Packets are captured via netfilter_log and counters are kept in memory-mapped file.\n"
+    "Packets are captured via netfilter_log and counted.\n"
+    "Table with the counters is synced to the filesystem via memory-mapping.\n"
     "\n"
     "Options:\n"
     "  -h --help                 print this help\n"
@@ -48,11 +49,11 @@ const char *help_text =
     "     --filename=<path>      path to file for table\n"
     "\n"
     "Example:\n"
-    "  sudo iptables -I OUTPUT -j NFLOG --nflog-group 32 --nflog-prefix foo\n"
-    "  sudo ./nflogtable --nflog-group=32\n"
+    "  sudo iptables -I OUTPUT -j NFLOG --nflog-group 32\n"
+    "  sudo ./nflogtable --nflog-group=32 --filename=test.tab --subnet=172.20.64.0/19\n"
     "\n"
     "Hint:\n"
-    "  You might want to use \"--nflog-qthreshold N\" for better performance.\n"
+    "  You might want to use \"--nflog-qthreshold N\" for better performance (see man iptables).\n"
     "\n";
 
 // for netfilter_log documentation, see http://netfilter.org/projects/libnetfilter_log/doxygen/
@@ -62,8 +63,8 @@ struct table_header_t {
     uint8_t version;
     uint8_t address_family;
     uint8_t prefix_size;
-    uint8_t aggregate_prefix;
-    uint32_t unused;
+    uint8_t unused1; // 64 bit padding
+    uint32_t unused2;
     union subnet_t {
         struct in_addr subnet_address4;
         struct in6_addr subnet_address6;
@@ -72,6 +73,7 @@ struct table_header_t {
     uint64_t end_time;
 } __attribute__((packed)) *table_header;
 
+// table cell
 struct counter_entry_t {
     uint64_t sent_packets;
     uint64_t sent_bytes;
@@ -80,9 +82,11 @@ struct counter_entry_t {
 } *counters;
 
 
+#define ASSERT(condition, error_msg) if (condition) { perror((error_msg)); exit(1); }
 #define IF_ERROR(command, error_msg) if (command) { perror((error_msg)); exit(1); }
 #define POSITIV(value)  ( ((value)>=0) ? (value) : 0 )
 #define RANGE(value, min, max)  ( ((value)>=(min)) ? ( (value)<=(max) ? (value) : (max) ) : (min) )
+#define RIGHT_BITSHIFT128(addr, nbit) if((nbit)>=64) { *((uint64_t*)addr); *((uint64_t*)addr) = 0;}
 
 int address_family;
 struct in_addr subnet_address4;
@@ -90,7 +94,7 @@ struct in6_addr subnet_address6;
 struct in_addr mask4;
 struct in6_addr mask6;
 int prefix_size = 0;
-unsigned int aggregate_prefix;
+unsigned int aggregate_suffix;
 unsigned long num_counters;
 size_t table_size;
 
@@ -170,7 +174,103 @@ static int print_pkt(struct nflog_data *ldata)
 static int handle_packet(struct nflog_g_handle *gh, struct nfgenmsg *nfmsg,
                 struct nflog_data *nfa, void *data)
 {
-        print_pkt(nfa);
+    struct nfulnl_msg_packet_hdr *ph = nflog_get_msg_packet_hdr(nfa);
+    char *payload;
+    int payload_len = nflog_get_payload(nfa, &payload);
+
+    // if we log ipv4 and the packet is ipv4
+    if ( (address_family == AF_INET) && ((payload[0] & 0xf0) == 0x40) ) {
+        int addr_size = 4;
+        int src_addr_offset = 12;
+        int dest_addr_offset = 16;
+        int size_offset = 2;
+
+        char out[64];
+        inet_ntop(address_family, &payload[src_addr_offset], out, 64);
+        printf("src=%s ", out);
+        inet_ntop(address_family, &payload[dest_addr_offset], out, 64);
+        printf("dest=%s ", out);
+
+        // test network mask against source and destination address
+        char src_internal = (*((uint32_t*)(payload + src_addr_offset)) & mask4.s_addr) == subnet_address4.s_addr;
+        char dest_internal = (*((uint32_t*)(payload + dest_addr_offset)) & mask4.s_addr) == subnet_address4.s_addr;
+
+        // extract size field
+        uint16_t size;
+        memcpy(&size, &payload[size_offset], 2);
+        size = ntohs(size);
+        printf("%d %d ", src_internal, dest_internal);
+
+        if (src_internal && !dest_internal) {
+            // outgoing packet
+            printf("out ");
+            int table_offset = ntohl(*((uint32_t*)(payload + src_addr_offset)) & ~mask4.s_addr);
+            printf("offset=%d ", table_offset);
+            counters[table_offset].sent_packets++;
+            counters[table_offset].sent_bytes += size;
+        }
+        if (!src_internal && dest_internal) {
+            // incoming packet
+            printf("in ");
+            int table_offset = ntohl(*((uint32_t*)(payload + dest_addr_offset)) & ~mask4.s_addr);
+            printf("offset=%d ", table_offset);
+            counters[table_offset].received_packets++;
+            counters[table_offset].received_bytes += size;
+        }
+
+        printf("size=%hu ", size);
+    }
+    // if we log ipv6 and the packet is ipv6
+    if ( (address_family == AF_INET6) && ((payload[0] & 0xf0) == 0x60) ) {
+        int addr_size = 16;
+        int src_addr_offset = 8;
+        int dest_addr_offset = 24;
+        int size_offset = 4;
+
+        char out[64];
+        inet_ntop(address_family, &payload[src_addr_offset], out, 64);
+        printf("src=%s ", out);
+        inet_ntop(address_family, &payload[dest_addr_offset], out, 64);
+        printf("dest=%s ", out);
+
+        // test network mask against source and destination address
+        char src_internal = (*((uint32_t*)(payload + src_addr_offset     )) & mask6.s6_addr32[0]) == subnet_address6.s6_addr32[0]
+                        &&  (*((uint32_t*)(payload + src_addr_offset +  4)) & mask6.s6_addr32[1]) == subnet_address6.s6_addr32[1]
+                        &&  (*((uint32_t*)(payload + src_addr_offset +  8)) & mask6.s6_addr32[2]) == subnet_address6.s6_addr32[2]
+                        &&  (*((uint32_t*)(payload + src_addr_offset + 12)) & mask6.s6_addr32[3]) == subnet_address6.s6_addr32[3];
+        char dest_internal = (*((uint32_t*)(payload + dest_addr_offset     )) & mask6.s6_addr32[0]) == subnet_address6.s6_addr32[0]
+                         &&  (*((uint32_t*)(payload + dest_addr_offset +  4)) & mask6.s6_addr32[1]) == subnet_address6.s6_addr32[1]
+                         &&  (*((uint32_t*)(payload + dest_addr_offset +  8)) & mask6.s6_addr32[2]) == subnet_address6.s6_addr32[2]
+                         &&  (*((uint32_t*)(payload + dest_addr_offset + 12)) & mask6.s6_addr32[3]) == subnet_address6.s6_addr32[3];
+
+        // extract size field
+        uint16_t size;
+        memcpy(&size, &payload[size_offset], 2);
+        size = ntohs(size);
+        printf("%d %d ", src_internal, dest_internal);
+
+        if (src_internal && !dest_internal) {
+            // outgoing packet
+            printf("out ");
+            int table_offset = ntohl(*((uint32_t*)(payload + src_addr_offset + 4)) & ~mask6.s6_addr32[1]);
+            printf("offset=%d ", table_offset);
+            counters[table_offset].sent_packets++;
+            counters[table_offset].sent_bytes += size;
+        }
+        if (!src_internal && dest_internal) {
+            // incoming packet
+            printf("in ");
+            int table_offset = ntohl(*((uint32_t*)(payload + dest_addr_offset + 4)) & ~mask6.s6_addr32[1]);
+            printf("offset=%d ", table_offset);
+            counters[table_offset].received_packets++;
+            counters[table_offset].received_bytes += size;
+        }
+
+        printf("size=%hu ", size);
+    }
+
+    fputc('\n', stdout);
+    //print_pkt(nfa);
 }
 
 
@@ -184,13 +284,11 @@ int main(int argc, char **argv)
     char daemonize = 0;
     char *filename = NULL;
     address_family = AF_UNSPEC;
-    aggregate_prefix = 1;
 
 	struct option longopts[] = {
         /* name, has_args, flag, val */
 		{"daemonize", no_argument, NULL, 'd'},
 		{"subnet", required_argument, NULL, 's'},
-        {"aggregate-prefix", required_argument, NULL, 'a'},
 		{"nflog-group", required_argument, NULL, 'g'},
 		{"filename", required_argument, NULL, 'f'},
 		{"help", no_argument, NULL, 'h'},
@@ -211,9 +309,6 @@ int main(int argc, char **argv)
 			break;
         case 'f':
             filename = optarg;
-            break;
-        case 'a':
-            aggregate_prefix = atoi(optarg);
             break;
 		case 's': {
             char* iparg = (char *)strdup(optarg);
@@ -236,11 +331,11 @@ int main(int argc, char **argv)
             if ( maskarg )
                 prefix_size = atoi(maskarg);
             if (address_family==AF_INET) {
-                IF_ERROR( (prefix_size <= 0) || (prefix_size > 32), "Error: prefix must be in 1-32 range\n");
+                ASSERT( (prefix_size <= 0) || (prefix_size > 32), "Error: prefix must be in 1-32 range\n");
                 mask4.s_addr = ntohl(0xffffffff << (32 - prefix_size) );
               }
             if (address_family==AF_INET6) {
-                IF_ERROR( (prefix_size <= 0) || (prefix_size > 128), "Error: prefix must be in 1-128 range\n");
+                ASSERT( (prefix_size <= 0) || (prefix_size > 128), "Error: prefix must be in 1-128 range\n");
                 mask6.s6_addr32[0] = ntohl(0xffffffff << POSITIV(32 - prefix_size));
                 mask6.s6_addr32[1] = prefix_size>32 ? ntohl(0xffffffff << POSITIV(64 - prefix_size)) : 0;
                 mask6.s6_addr32[2] = prefix_size>64 ? ntohl(0xffffffff << POSITIV(96 - prefix_size)) : 0;
@@ -261,12 +356,14 @@ int main(int argc, char **argv)
 	}
 
     // verify arguments
-    IF_ERROR(nflog_group == -1, "You must provide a nflog group!\n");
-    IF_ERROR(address_family == AF_UNSPEC, "You must provide a ipv4 or ipv6 subnet\n");
-    IF_ERROR(filename == NULL, "You must provide a filename\n");
+    ASSERT(nflog_group == -1, "You must provide a nflog group (see --help)!\n");
+    ASSERT(address_family == AF_UNSPEC, "You must provide a ipv4 or ipv6 subnet (see --help)\n");
+    ASSERT(filename == NULL, "You must provide a filename (see --help)\n");
 
     // calculate size of table file
-    num_counters = 1 << (prefix_size - aggregate_prefix - 1);
+    char max_prefix_size = address_family == AF_INET ? 32 : 128;
+    int aggregate_suffix = AF_INET ? 0 : 64; // only log /64 for ipv6 subnets
+    num_counters = 1 << (max_prefix_size - prefix_size - aggregate_suffix + 1);
     table_size = sizeof(struct table_header_t) + num_counters*sizeof(struct counter_entry_t);
 
     // register signal handler
@@ -278,7 +375,7 @@ int main(int argc, char **argv)
     IF_ERROR( write(mmap_fd, "", 1) == -1, "Could not write to end of file" );
 
     table_header = mmap(NULL, table_size, PROT_READ|PROT_WRITE, MAP_SHARED, mmap_fd, 0);
-    IF_ERROR( table_header == MAP_FAILED, "Could not map table header to memory");
+    ASSERT( table_header == MAP_FAILED, "Could not map table header to memory");
     counters = (struct counter_entry_t*) table_header + 1;
 
     // initialize file
@@ -289,7 +386,6 @@ int main(int argc, char **argv)
     else
         table_header->subnet.subnet_address6 = subnet_address6;
     table_header->prefix_size = prefix_size;
-    table_header->aggregate_prefix = aggregate_prefix;
     table_header->start_time = time(NULL);
     memset(counters, 0, sizeof(struct counter_entry_t)*num_counters);
 
@@ -333,6 +429,7 @@ int main(int argc, char **argv)
 
     // cleanup counter table
     table_header->end_time = time( NULL );
+    msync( table_header, table_size, MS_SYNC );
     munmap( table_header, table_size );
     close( mmap_fd );
 

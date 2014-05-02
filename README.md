@@ -11,8 +11,7 @@ Traffic counter daemon
 | 1      | Version (1)                      |
 | 1      | IP-Version (AF_INET or AF_INET6) |
 | 1      | prefix size                      |
-| 1      | Resolution                       |
-| 4      | reserved for alignment           |
+| 5      | reserved for alignment           |
 | 16     | Subnet (for v4 only first bytes) |
 | 8      | Start time of statistic          |
 | 8      | End time                         |
