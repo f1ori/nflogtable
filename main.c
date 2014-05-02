@@ -33,6 +33,8 @@
 
 #include <libnetfilter_log/libnetfilter_log.h>
 
+#define DEBUG_ON 0
+
 const char *version_text = "nflogtable Version 0.1\n";
 
 const char *help_text =
@@ -87,6 +89,7 @@ struct counter_entry_t {
 #define POSITIV(value)  ( ((value)>=0) ? (value) : 0 )
 #define RANGE(value, min, max)  ( ((value)>=(min)) ? ( (value)<=(max) ? (value) : (max) ) : (min) )
 #define RIGHT_BITSHIFT128(addr, nbit) if((nbit)>=64) { *((uint64_t*)addr); *((uint64_t*)addr) = 0;}
+#define DEBUG(format, ...) if (DEBUG_ON) { fprintf (stdout, format, ##__VA_ARGS__); }
 
 int address_family;
 struct in_addr subnet_address4;
@@ -187,9 +190,9 @@ static int handle_packet(struct nflog_g_handle *gh, struct nfgenmsg *nfmsg,
 
         char out[64];
         inet_ntop(address_family, &payload[src_addr_offset], out, 64);
-        printf("src=%s ", out);
+        DEBUG("src=%s ", out);
         inet_ntop(address_family, &payload[dest_addr_offset], out, 64);
-        printf("dest=%s ", out);
+        DEBUG("dest=%s ", out);
 
         // test network mask against source and destination address
         char src_internal = (*((uint32_t*)(payload + src_addr_offset)) & mask4.s_addr) == subnet_address4.s_addr;
@@ -199,26 +202,26 @@ static int handle_packet(struct nflog_g_handle *gh, struct nfgenmsg *nfmsg,
         uint16_t size;
         memcpy(&size, &payload[size_offset], 2);
         size = ntohs(size);
-        printf("%d %d ", src_internal, dest_internal);
+        DEBUG("%d %d ", src_internal, dest_internal);
 
         if (src_internal && !dest_internal) {
             // outgoing packet
-            printf("out ");
+            DEBUG("out ");
             int table_offset = ntohl(*((uint32_t*)(payload + src_addr_offset)) & ~mask4.s_addr);
-            printf("offset=%d ", table_offset);
+            DEBUG("offset=%d ", table_offset);
             counters[table_offset].sent_packets++;
             counters[table_offset].sent_bytes += size;
         }
         if (!src_internal && dest_internal) {
             // incoming packet
-            printf("in ");
+            DEBUG("in ");
             int table_offset = ntohl(*((uint32_t*)(payload + dest_addr_offset)) & ~mask4.s_addr);
-            printf("offset=%d ", table_offset);
+            DEBUG("offset=%d ", table_offset);
             counters[table_offset].received_packets++;
             counters[table_offset].received_bytes += size;
         }
 
-        printf("size=%hu ", size);
+        DEBUG("size=%hu ", size);
     }
     // if we log ipv6 and the packet is ipv6
     if ( (address_family == AF_INET6) && ((payload[0] & 0xf0) == 0x60) ) {
@@ -229,9 +232,9 @@ static int handle_packet(struct nflog_g_handle *gh, struct nfgenmsg *nfmsg,
 
         char out[64];
         inet_ntop(address_family, &payload[src_addr_offset], out, 64);
-        printf("src=%s ", out);
+        DEBUG("src=%s ", out);
         inet_ntop(address_family, &payload[dest_addr_offset], out, 64);
-        printf("dest=%s ", out);
+        DEBUG("dest=%s ", out);
 
         // test network mask against source and destination address
         char src_internal = (*((uint32_t*)(payload + src_addr_offset     )) & mask6.s6_addr32[0]) == subnet_address6.s6_addr32[0]
@@ -247,30 +250,29 @@ static int handle_packet(struct nflog_g_handle *gh, struct nfgenmsg *nfmsg,
         uint16_t size;
         memcpy(&size, &payload[size_offset], 2);
         size = ntohs(size);
-        printf("%d %d ", src_internal, dest_internal);
+        DEBUG("%d %d ", src_internal, dest_internal);
 
         if (src_internal && !dest_internal) {
             // outgoing packet
-            printf("out ");
+            DEBUG("out ");
             int table_offset = ntohl(*((uint32_t*)(payload + src_addr_offset + 4)) & ~mask6.s6_addr32[1]);
-            printf("offset=%d ", table_offset);
+            DEBUG("offset=%d ", table_offset);
             counters[table_offset].sent_packets++;
             counters[table_offset].sent_bytes += size;
         }
         if (!src_internal && dest_internal) {
             // incoming packet
-            printf("in ");
+            DEBUG("in ");
             int table_offset = ntohl(*((uint32_t*)(payload + dest_addr_offset + 4)) & ~mask6.s6_addr32[1]);
-            printf("offset=%d ", table_offset);
+            DEBUG("offset=%d ", table_offset);
             counters[table_offset].received_packets++;
             counters[table_offset].received_bytes += size;
         }
 
-        printf("size=%hu ", size);
+        DEBUG("size=%hu ", size);
     }
+    DEBUG("\n");
 
-    fputc('\n', stdout);
-    //print_pkt(nfa);
 }
 
 
@@ -375,7 +377,7 @@ int main(int argc, char **argv)
     IF_ERROR( write(mmap_fd, "", 1) == -1, "Could not write to end of file" );
 
     table_header = mmap(NULL, table_size, PROT_READ|PROT_WRITE, MAP_SHARED, mmap_fd, 0);
-    IF_ERROR( table_header != MAP_FAILED, "Could not map table header to memory");
+    ASSERT( table_header != MAP_FAILED, "Could not map file into memory");
     counters = (struct counter_entry_t*) table_header + 1;
 
     // initialize file
@@ -405,11 +407,11 @@ int main(int argc, char **argv)
     // get file descriptor for receiving packets
     nflog_filedesc = nflog_fd(handle);
 
-    printf("going into main loop\n");
+    DEBUG("going into main loop\n");
     // main processing loop
     while ((rv = recv(nflog_filedesc, buf, sizeof(buf), 0)) && rv >= 0) {
         struct nlmsghdr *nlh;
-        printf("pkt received (len=%u)\n", rv);
+        DEBUG("nflog packet received (len=%u)\n", rv);
 
         /* handle messages in just-received packet */
         nflog_handle_packet(handle, buf, rv);
