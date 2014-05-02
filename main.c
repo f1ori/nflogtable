@@ -82,7 +82,7 @@ struct counter_entry_t {
 } *counters;
 
 
-#define ASSERT(condition, error_msg) if (condition) { perror((error_msg)); exit(1); }
+#define ASSERT(condition, error_msg) if (!(condition)) { fputs((error_msg), stderr); exit(1); }
 #define IF_ERROR(command, error_msg) if (command) { perror((error_msg)); exit(1); }
 #define POSITIV(value)  ( ((value)>=0) ? (value) : 0 )
 #define RANGE(value, min, max)  ( ((value)>=(min)) ? ( (value)<=(max) ? (value) : (max) ) : (min) )
@@ -331,11 +331,11 @@ int main(int argc, char **argv)
             if ( maskarg )
                 prefix_size = atoi(maskarg);
             if (address_family==AF_INET) {
-                ASSERT( (prefix_size <= 0) || (prefix_size > 32), "Error: prefix must be in 1-32 range\n");
+                ASSERT( (prefix_size > 0) && (prefix_size <= 32), "Error: prefix must be in 1-32 range\n");
                 mask4.s_addr = ntohl(0xffffffff << (32 - prefix_size) );
               }
             if (address_family==AF_INET6) {
-                ASSERT( (prefix_size <= 0) || (prefix_size > 128), "Error: prefix must be in 1-128 range\n");
+                ASSERT( (prefix_size > 0) && (prefix_size <= 128), "Error: prefix must be in 1-128 range\n");
                 mask6.s6_addr32[0] = ntohl(0xffffffff << POSITIV(32 - prefix_size));
                 mask6.s6_addr32[1] = prefix_size>32 ? ntohl(0xffffffff << POSITIV(64 - prefix_size)) : 0;
                 mask6.s6_addr32[2] = prefix_size>64 ? ntohl(0xffffffff << POSITIV(96 - prefix_size)) : 0;
@@ -356,9 +356,9 @@ int main(int argc, char **argv)
 	}
 
     // verify arguments
-    ASSERT(nflog_group == -1, "You must provide a nflog group (see --help)!\n");
-    ASSERT(address_family == AF_UNSPEC, "You must provide a ipv4 or ipv6 subnet (see --help)\n");
-    ASSERT(filename == NULL, "You must provide a filename (see --help)\n");
+    ASSERT(nflog_group != -1, "You must provide a nflog group (see --help)!\n");
+    ASSERT(address_family != AF_UNSPEC, "You must provide a ipv4 or ipv6 subnet (see --help)\n");
+    ASSERT(filename != NULL, "You must provide a filename (see --help)\n");
 
     // calculate size of table file
     char max_prefix_size = address_family == AF_INET ? 32 : 128;
@@ -375,7 +375,7 @@ int main(int argc, char **argv)
     IF_ERROR( write(mmap_fd, "", 1) == -1, "Could not write to end of file" );
 
     table_header = mmap(NULL, table_size, PROT_READ|PROT_WRITE, MAP_SHARED, mmap_fd, 0);
-    ASSERT( table_header == MAP_FAILED, "Could not map table header to memory");
+    IF_ERROR( table_header != MAP_FAILED, "Could not map table header to memory");
     counters = (struct counter_entry_t*) table_header + 1;
 
     // initialize file
