@@ -21,12 +21,13 @@ If you need to debug the application (e. g. to see if packets come in), run `mak
 
 ## Options
 
+```
   -h --help                 print this help
   -v --version              print version information
      --nflog-group=<id>     nflog group
      --subnet=<ip/cidr>     ipv4 or ipv6 subnet to counter traffic for
      --filename=<path>      path to file for table
-
+```
 
 ## Example usage
 
