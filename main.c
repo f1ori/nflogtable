@@ -33,7 +33,11 @@
 
 #include <libnetfilter_log/libnetfilter_log.h>
 
+#if DEBUG
+#define DEBUG_ON 1
+#else
 #define DEBUG_ON 0
+#endif
 
 const char *version_text = "nflogtable Version 0.1\n";
 
@@ -89,7 +93,7 @@ struct counter_entry_t {
 #define POSITIV(value)  ( ((value)>=0) ? (value) : 0 )
 #define RANGE(value, min, max)  ( ((value)>=(min)) ? ( (value)<=(max) ? (value) : (max) ) : (min) )
 #define RIGHT_BITSHIFT128(addr, nbit) if((nbit)>=64) { *((uint64_t*)addr); *((uint64_t*)addr) = 0;}
-#define DEBUG(format, ...) if (DEBUG_ON) { fprintf (stdout, format, ##__VA_ARGS__); }
+#define debug_print(format, ...) if (DEBUG_ON) { fprintf (stdout, format, ##__VA_ARGS__); }
 
 int address_family;
 struct in_addr subnet_address4;
@@ -190,9 +194,9 @@ static int handle_packet(struct nflog_g_handle *gh, struct nfgenmsg *nfmsg,
 
         char out[64];
         inet_ntop(address_family, &payload[src_addr_offset], out, 64);
-        DEBUG("src=%s ", out);
+        debug_print("src=%s ", out);
         inet_ntop(address_family, &payload[dest_addr_offset], out, 64);
-        DEBUG("dest=%s ", out);
+        debug_print("dest=%s ", out);
 
         // test network mask against source and destination address
         char src_internal = (*((uint32_t*)(payload + src_addr_offset)) & mask4.s_addr) == subnet_address4.s_addr;
@@ -202,26 +206,26 @@ static int handle_packet(struct nflog_g_handle *gh, struct nfgenmsg *nfmsg,
         uint16_t size;
         memcpy(&size, &payload[size_offset], 2);
         size = ntohs(size);
-        DEBUG("%d %d ", src_internal, dest_internal);
+        debug_print("%d %d ", src_internal, dest_internal);
 
         if (src_internal && !dest_internal) {
             // outgoing packet
-            DEBUG("out ");
+            debug_print("out ");
             int table_offset = ntohl(*((uint32_t*)(payload + src_addr_offset)) & ~mask4.s_addr);
-            DEBUG("offset=%d ", table_offset);
+            debug_print("offset=%d ", table_offset);
             counters[table_offset].sent_packets++;
             counters[table_offset].sent_bytes += size;
         }
         if (!src_internal && dest_internal) {
             // incoming packet
-            DEBUG("in ");
+            debug_print("in ");
             int table_offset = ntohl(*((uint32_t*)(payload + dest_addr_offset)) & ~mask4.s_addr);
-            DEBUG("offset=%d ", table_offset);
+            debug_print("offset=%d ", table_offset);
             counters[table_offset].received_packets++;
             counters[table_offset].received_bytes += size;
         }
 
-        DEBUG("size=%hu ", size);
+        debug_print("size=%hu ", size);
     }
     // if we log ipv6 and the packet is ipv6
     if ( (address_family == AF_INET6) && ((payload[0] & 0xf0) == 0x60) ) {
@@ -232,9 +236,9 @@ static int handle_packet(struct nflog_g_handle *gh, struct nfgenmsg *nfmsg,
 
         char out[64];
         inet_ntop(address_family, &payload[src_addr_offset], out, 64);
-        DEBUG("src=%s ", out);
+        debug_print("src=%s ", out);
         inet_ntop(address_family, &payload[dest_addr_offset], out, 64);
-        DEBUG("dest=%s ", out);
+        debug_print("dest=%s ", out);
 
         // test network mask against source and destination address
         char src_internal = (*((uint32_t*)(payload + src_addr_offset     )) & mask6.s6_addr32[0]) == subnet_address6.s6_addr32[0]
@@ -250,28 +254,28 @@ static int handle_packet(struct nflog_g_handle *gh, struct nfgenmsg *nfmsg,
         uint16_t size;
         memcpy(&size, &payload[size_offset], 2);
         size = ntohs(size);
-        DEBUG("%d %d ", src_internal, dest_internal);
+        debug_print("%d %d ", src_internal, dest_internal);
 
         if (src_internal && !dest_internal) {
             // outgoing packet
-            DEBUG("out ");
+            debug_print("out ");
             int table_offset = ntohl(*((uint32_t*)(payload + src_addr_offset + 4)) & ~mask6.s6_addr32[1]);
-            DEBUG("offset=%d ", table_offset);
+            debug_print("offset=%d ", table_offset);
             counters[table_offset].sent_packets++;
             counters[table_offset].sent_bytes += size;
         }
         if (!src_internal && dest_internal) {
             // incoming packet
-            DEBUG("in ");
+            debug_print("in ");
             int table_offset = ntohl(*((uint32_t*)(payload + dest_addr_offset + 4)) & ~mask6.s6_addr32[1]);
-            DEBUG("offset=%d ", table_offset);
+            debug_print("offset=%d ", table_offset);
             counters[table_offset].received_packets++;
             counters[table_offset].received_bytes += size;
         }
 
-        DEBUG("size=%hu ", size);
+        debug_print("size=%hu ", size);
     }
-    DEBUG("\n");
+    debug_print("\n");
 
 }
 
@@ -407,11 +411,11 @@ int main(int argc, char **argv)
     // get file descriptor for receiving packets
     nflog_filedesc = nflog_fd(handle);
 
-    DEBUG("going into main loop\n");
+    debug_print("going into main loop\n");
     // main processing loop
     while ((rv = recv(nflog_filedesc, buf, sizeof(buf), 0)) && rv >= 0) {
         struct nlmsghdr *nlh;
-        DEBUG("nflog packet received (len=%u)\n", rv);
+        debug_print("nflog packet received (len=%u)\n", rv);
 
         /* handle messages in just-received packet */
         nflog_handle_packet(handle, buf, rv);
