@@ -108,9 +108,9 @@ size_t table_size;
 
 void sig_handler(int signo)
 {
-	if (signo == SIGHUP) {
-		msync(table_header, table_size, MS_ASYNC);
-	}
+    if (signo == SIGHUP) {
+        msync(table_header, table_size, MS_ASYNC);
+    }
 }
 
 static int print_pkt(struct nflog_data *ldata)
@@ -291,32 +291,32 @@ int main(int argc, char **argv)
     char *filename = NULL;
     address_family = AF_UNSPEC;
 
-	struct option longopts[] = {
+    struct option longopts[] = {
         /* name, has_args, flag, val */
-		{"daemonize", no_argument, NULL, 'd'},
-		{"subnet", required_argument, NULL, 's'},
-		{"nflog-group", required_argument, NULL, 'g'},
-		{"filename", required_argument, NULL, 'f'},
-		{"help", no_argument, NULL, 'h'},
-		{"version", no_argument, NULL, 'v'},
-		{0, 0, 0, 0}
-	};
+        {"daemonize", no_argument, NULL, 'd'},
+        {"subnet", required_argument, NULL, 's'},
+        {"nflog-group", required_argument, NULL, 'g'},
+        {"filename", required_argument, NULL, 'f'},
+        {"help", no_argument, NULL, 'h'},
+        {"version", no_argument, NULL, 'v'},
+        {0, 0, 0, 0}
+    };
 
-	int opt;
-	while ( (opt = getopt_long(argc, argv, "ds:g:f:a:hv", longopts, NULL)) != -1) {
-		switch (opt) {
-		case 'h':
-			printf("%s", help_text);
-			exit(0);
-			break;
-		case 'v':
-			printf("%s", version_text);
-			exit(0);
-			break;
+    int opt;
+    while ( (opt = getopt_long(argc, argv, "ds:g:f:a:hv", longopts, NULL)) != -1) {
+        switch (opt) {
+        case 'h':
+            printf("%s", help_text);
+            exit(0);
+            break;
+        case 'v':
+            printf("%s", version_text);
+            exit(0);
+            break;
         case 'f':
             filename = optarg;
             break;
-		case 's': {
+        case 's': {
             char* iparg = (char *)strdup(optarg);
             char *maskarg;
             if ( (maskarg = strchr(iparg, '/')) ) {
@@ -347,7 +347,7 @@ int main(int argc, char **argv)
                 mask6.s6_addr32[2] = prefix_size>64 ? ntohl(0xffffffff << POSITIV(96 - prefix_size)) : 0;
                 mask6.s6_addr32[3] = prefix_size>96 ? ntohl(0xffffffff << POSITIV(128 - prefix_size)) : 0;
             }
-			break;
+            break;
         }
         case 'g':
             nflog_group = atoi(optarg);
@@ -355,11 +355,11 @@ int main(int argc, char **argv)
         case 'd':
             daemonize = 1;
             break;
-		case '?':
+        case '?':
             fprintf(stderr, "Unknown argument, see --help\n");
-			exit(1);
-		}
-	}
+        exit(1);
+        }
+    }
 
     // verify arguments
     ASSERT(nflog_group != -1, "You must provide a nflog group (see --help)!\n");
@@ -369,7 +369,7 @@ int main(int argc, char **argv)
     // calculate size of table file
     char max_prefix_size = address_family == AF_INET ? 32 : 128;
     int aggregate_suffix = AF_INET ? 0 : 64; // only log /64 for ipv6 subnets
-    num_counters = 1 << (max_prefix_size - prefix_size - aggregate_suffix + 1);
+    num_counters = 1 << (max_prefix_size - prefix_size - aggregate_suffix);
     table_size = sizeof(struct table_header_t) + num_counters*sizeof(struct counter_entry_t);
 
     // register signal handler
@@ -441,3 +441,5 @@ int main(int argc, char **argv)
 
     exit(0);
 }
+
+// vim: sw=4 expandtab
