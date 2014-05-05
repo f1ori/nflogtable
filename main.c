@@ -211,7 +211,7 @@ static int handle_packet(struct nflog_g_handle *gh, struct nfgenmsg *nfmsg,
         if (src_internal && !dest_internal) {
             // outgoing packet
             debug_print("out ");
-            int table_offset = ntohl(*((uint32_t*)(payload + src_addr_offset)) & ~mask4.s_addr);
+            uint32_t table_offset = ntohl(*((uint32_t*)(payload + src_addr_offset)) & ~mask4.s_addr);
             debug_print("offset=%d ", table_offset);
             counters[table_offset].sent_packets++;
             counters[table_offset].sent_bytes += size;
@@ -219,7 +219,7 @@ static int handle_packet(struct nflog_g_handle *gh, struct nfgenmsg *nfmsg,
         if (!src_internal && dest_internal) {
             // incoming packet
             debug_print("in ");
-            int table_offset = ntohl(*((uint32_t*)(payload + dest_addr_offset)) & ~mask4.s_addr);
+            uint32_t table_offset = ntohl(*((uint32_t*)(payload + dest_addr_offset)) & ~mask4.s_addr);
             debug_print("offset=%d ", table_offset);
             counters[table_offset].received_packets++;
             counters[table_offset].received_bytes += size;
@@ -259,7 +259,7 @@ static int handle_packet(struct nflog_g_handle *gh, struct nfgenmsg *nfmsg,
         if (src_internal && !dest_internal) {
             // outgoing packet
             debug_print("out ");
-            int table_offset = ntohl(*((uint32_t*)(payload + src_addr_offset + 4)) & ~mask6.s6_addr32[1]);
+            uint32_t table_offset = ntohl(*((uint32_t*)(payload + src_addr_offset + 4)) & ~mask6.s6_addr32[1]);
             debug_print("offset=%d ", table_offset);
             counters[table_offset].sent_packets++;
             counters[table_offset].sent_bytes += size;
@@ -267,7 +267,7 @@ static int handle_packet(struct nflog_g_handle *gh, struct nfgenmsg *nfmsg,
         if (!src_internal && dest_internal) {
             // incoming packet
             debug_print("in ");
-            int table_offset = ntohl(*((uint32_t*)(payload + dest_addr_offset + 4)) & ~mask6.s6_addr32[1]);
+            uint32_t table_offset = ntohl(*((uint32_t*)(payload + dest_addr_offset + 4)) & ~mask6.s6_addr32[1]);
             debug_print("offset=%d ", table_offset);
             counters[table_offset].received_packets++;
             counters[table_offset].received_bytes += size;
@@ -382,7 +382,7 @@ int main(int argc, char **argv)
 
     table_header = mmap(NULL, table_size, PROT_READ|PROT_WRITE, MAP_SHARED, mmap_fd, 0);
     ASSERT( table_header != MAP_FAILED, "Could not map file into memory");
-    counters = (struct counter_entry_t*) table_header + 1;
+    counters = ((void*)table_header) + sizeof(struct table_header_t);
 
     // initialize file
     table_header->version = 1;
